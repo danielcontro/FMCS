@@ -135,10 +135,10 @@ def reachable_states_from_region(ts: BddFsm, start_region: BDD) -> Tuple[BDD, Fr
         reach = reach + frontiers[-1]
     return reach, frontiers
 
-def is_phi_repeatable_from_reach(ts: BddFsm, phi: Spec, reach: BDD) -> bool:
+def phi_repeatable_from_reach(ts: BddFsm, phi: Spec, reach: BDD) -> BDD:
     '''
-    Returns a boolean indicating whether the base formula `phi` is repeatable
-    from the region of reachable states `reach`
+    Returns the region of states (possibly empty) where the base formula `phi`
+    is repeatable from the region of reachable states `reach`
     '''
     recur = reach & spec_to_bdd(ts, phi)
     while recur.isnot_false():
@@ -146,10 +146,10 @@ def is_phi_repeatable_from_reach(ts: BddFsm, phi: Spec, reach: BDD) -> bool:
         new = ts.pre(recur)
         while new.isnot_false():
             preReach = preReach + new
-            if recur.entailed(preReach): return True
+            if recur.entailed(preReach): return recur
             new = ts.pre(new) - preReach
         recur = recur & preReach
-    return False
+    return BDD.false()
 
 def check_explain_gr1_spec(spec: Spec) -> Tuple[bool, Counterexample | None] | None:
     """
