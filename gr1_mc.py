@@ -3,6 +3,15 @@ import sys
 from pynusmv_lower_interface.nusmv.parser import parser 
 from collections import deque
 
+from typing import Set, Tuple, List
+from pynusmv.dd import BDD, Inputs, State
+from pynusmv.fsm import BddFsm
+from pynusmv.prop import Spec
+
+Counterexample = List[State | Inputs]
+
+DEBUG = True
+
 specTypes = {'LTLSPEC': parser.TOK_LTLSPEC, 'CONTEXT': parser.CONTEXT,
     'IMPLIES': parser.IMPLIES, 'IFF': parser.IFF, 'OR': parser.OR, 'XOR': parser.XOR, 'XNOR': parser.XNOR,
     'AND': parser.AND, 'NOT': parser.NOT, 'ATOM': parser.ATOM, 'NUMBER': parser.NUMBER, 'DOT': parser.DOT,
@@ -17,7 +26,7 @@ basicTypes = {parser.ATOM, parser.NUMBER, parser.TRUEEXP, parser.FALSEEXP, parse
               parser.EQUAL, parser.NOTEQUAL, parser.LT, parser.GT, parser.LE, parser.GE}
 booleanOp = {parser.AND, parser.OR, parser.XOR, parser.XNOR, parser.IMPLIES, parser.IFF}
 
-def spec_to_bdd(model, spec):
+def spec_to_bdd(model: BddFsm, spec: Spec) -> BDD:
     """
     Given a formula `spec` with no temporal operators, returns a BDD equivalent to
     the formula, that is, a BDD that contains all the states of `model` that
@@ -26,20 +35,20 @@ def spec_to_bdd(model, spec):
     bddspec = pynusmv.mc.eval_simple_expression(model, str(spec))
     return bddspec
     
-def is_boolean_formula(spec):
+def is_boolean_formula(spec) -> bool:
     """
     Given a formula `spec`, checks if the formula is a boolean combination of base
     formulas with no temporal operators. 
     """
     if spec.type in basicTypes:
         return True
-    if spec.type == specTypes['NOT']:
+    elif spec.type == specTypes['NOT']:
         return is_boolean_formula(spec.car)
-    if spec.type in booleanOp:
+    elif spec.type in booleanOp:
         return is_boolean_formula(spec.car) and is_boolean_formula(spec.cdr)
     return False
-    
-def is_GF_formula(spec):
+
+def is_GF_formula(spec) -> bool:
     """
     Given a formula `spec` checks if the formula is of the form GF f, where f is a 
     boolean combination of base formulas with no temporal operators 
@@ -52,8 +61,7 @@ def is_GF_formula(spec):
         return False
     return is_boolean_formula(spec.car)
 
-
-def create_set_of_formulas(spec):
+def create_set_of_formulas(spec) -> Set[Spec] | None:
     """
     Given a formula `spec` of the form
     
@@ -81,7 +89,7 @@ def create_set_of_formulas(spec):
             f_set.add(head.car.car)
     return f_set
 
-def parse_gr1(spec):
+def parse_gr1(spec) -> Tuple[Set[Spec], Set[Spec]] | None:
     """
     Visit the syntactic tree of the formula `spec` to check if it is a GR(1) formula,
     that is wether the formula is of the form
@@ -97,22 +105,23 @@ def parse_gr1(spec):
     # the root of a spec should be of type CONTEXT
     if spec.type != specTypes['CONTEXT']:
         return None
-    # the right child of a context is the main formula
-    spec = spec.cdr
-    # the root of a GR(1) formula should be of type IMPLIES
-    if spec.type != specTypes['IMPLIES']:
-        return None
-    # Create the set of formulas for the lhs of the implication
-    f_set = create_set_of_formulas(spec.car)
-    if f_set == None:
-        return None
-    # Create the set of formulas for the rhs of the implication
-    g_set = create_set_of_formulas(spec.cdr)
-    if g_set == None:
-        return None
-    return (f_set, g_set)
+    else:
+        # the right child of a context is the main formula
+        spec = spec.cdr
+        # the root of a GR(1) formula should be of type IMPLIES
+        if spec.type != specTypes['IMPLIES']:
+            return None
+        # Create the set of formulas for the lhs of the implication
+        f_set = create_set_of_formulas(spec.car)
+        if f_set == None:
+            return None
+        # Create the set of formulas for the rhs of the implication
+        g_set = create_set_of_formulas(spec.cdr)
+        if g_set == None:
+            return None
+        return (f_set, g_set)
 
-def check_explain_gr1_spec(spec):
+def check_explain_gr1_spec(spec: Spec) -> Tuple[bool, Counterexample | None] | None:
     """
     Return whether the loaded SMV model satisfies or not the GR(1) formula
     `spec`, that is, whether all executions of the model satisfies `spec`
@@ -130,32 +139,36 @@ def check_explain_gr1_spec(spec):
     where keys are state and inputs variable of the loaded SMV model, and values
     are their value.
     """
-    if parse_gr1(spec) == None:
+    parse_result = parse_gr1(spec)
+    if parse_result == None:
         return None
-    return pynusmv.mc.check_explain_ltl_spec(spec)
+    if DEBUG:
+        check = pynusmv.mc.check_explain_ltl_spec(spec)
+    return None
 
-if len(sys.argv) != 2:
-    print("Usage:", sys.argv[0], "filename.smv")
-    sys.exit(1)
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage:", sys.argv[0], "filename.smv")
+        sys.exit(1)
 
-pynusmv.init.init_nusmv()
-filename = sys.argv[1]
-pynusmv.glob.load_from_file(filename)
-pynusmv.glob.compute_model()
-type_ltl = pynusmv.prop.propTypes['LTL']
-for prop in pynusmv.glob.prop_database():
-    spec = prop.expr
-    print(spec)
-    if prop.type != type_ltl:
-        print("property is not LTLSPEC, skipping")
-        continue
-    res = check_explain_gr1_spec(spec)
-    if res == None:
-        print('Property is not a GR(1) formula, skipping')
-    if res[0] == True:
-        print("Property is respected")
-    elif res[0] == False:
-        print("Property is not respected")
-        print("Counterexample:", res[1])
+    pynusmv.init.init_nusmv()
+    filename = sys.argv[1]
+    pynusmv.glob.load_from_file(filename)
+    pynusmv.glob.compute_model()
+    type_ltl = pynusmv.prop.propTypes['LTL']
+    for prop in pynusmv.glob.prop_database():
+        spec = prop.expr
+        print(spec)
+        if prop.type != type_ltl:
+            print("property is not LTLSPEC, skipping")
+            continue
+        res = check_explain_gr1_spec(spec)
+        if res == None:
+            print('Property is not a GR(1) formula, skipping')
+        elif res[0] == True:
+            print("Property is respected")
+        elif res[0] == False:
+            print("Property is not respected")
+            print("Counterexample:", res[1])
 
-pynusmv.init.deinit_nusmv()
+    pynusmv.init.deinit_nusmv()
