@@ -9,6 +9,7 @@ from pynusmv.fsm import BddFsm
 from pynusmv.prop import Spec
 
 Counterexample = List[State | Inputs]
+Frontiers = List[BDD]
 
 DEBUG = True
 
@@ -120,6 +121,19 @@ def parse_gr1(spec) -> Tuple[Set[Spec], Set[Spec]] | None:
         if g_set == None:
             return None
         return (f_set, g_set)
+
+def reachable_states_from_region(ts: BddFsm, start_region: BDD) -> Tuple[BDD, Frontiers]:
+    '''
+    Computes the reachable states of the given transition system `ts` starting
+    from the `start_region` region and returns a tuple with the reachable
+    states and the frontiers explored during the computation
+    '''
+    reach = start_region
+    frontiers = [reach]
+    while frontiers[-1].isnot_false():
+        frontiers.append(ts.post(frontiers[-1]) - reach)
+        reach = reach + frontiers[-1]
+    return reach, frontiers
 
 def check_explain_gr1_spec(spec: Spec) -> Tuple[bool, Counterexample | None] | None:
     """
