@@ -135,6 +135,22 @@ def reachable_states_from_region(ts: BddFsm, start_region: BDD) -> Tuple[BDD, Fr
         reach = reach + frontiers[-1]
     return reach, frontiers
 
+def is_phi_repeatable_from_reach(ts: BddFsm, phi: Spec, reach: BDD) -> bool:
+    '''
+    Returns a boolean indicating whether the base formula `phi` is repeatable
+    from the region of reachable states `reach`
+    '''
+    recur = reach & spec_to_bdd(ts, phi)
+    while recur.isnot_false():
+        preReach = BDD.false()
+        new = ts.pre(recur)
+        while new.isnot_false():
+            preReach = preReach + new
+            if recur.entailed(preReach): return True
+            new = ts.pre(new) - preReach
+        recur = recur & preReach
+    return False
+
 def check_explain_gr1_spec(spec: Spec) -> Tuple[bool, Counterexample | None] | None:
     """
     Return whether the loaded SMV model satisfies or not the GR(1) formula
