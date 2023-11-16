@@ -1,0 +1,497 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{fontspec}
+\usepackage{minted}
+\usepackage{stmaryrd}
+\usemintedstyle{emacs}
+
+% \renewcommand{\theFancyVerbLine}{
+%   \sffamily\textcolor[rgb]{0.5,0.5,0.5}{\scriptsize\arabic{FancyVerbLine}}}
+\newcommand{\mintedOptions}{fontsize=\scriptsize}
+\newcommand{\minline}[1]{{\footnotesize \mintinline{python}{#1}}}
+\setmonofont{JetBrainsMono Nerd Font Mono}
+
+\title{Verification of \\ General Reactivity of rank 1 formulas}
+\author{Daniel Eduardo Contro - 2062899}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+The General Reactivity of rank 1 formulas, in short GR(1), are a special class
+of formulas with the following shape:
+\[
+	(\Box\Diamond f_1 \wedge .. \wedge \Box\Diamond f_n) \to
+	(\Box\Diamond g_1 \wedge .. \wedge \Box\Diamond g_m)
+\]
+or more generally
+\[
+	\left(\bigwedge_{i = 1}^n\Box\Diamond f_i \right) \to
+	\left(\bigwedge_{j = 1}^m\Box\Diamond g_j \right)
+\]
+A system $TS$ satisfies a specification $\varphi$ if every infinite execution
+satisfies $\varphi$ or in other words
+\[
+	TS \vDash \varphi \Leftrightarrow \forall\, \rho.\; \rho \vDash \varphi
+\]
+hence
+\[
+	TS \nvDash \varphi \Leftrightarrow \exists\, \rho.\; \rho \vDash \neg\varphi
+\]
+thus it will be searched a trace $\rho$ such that $\rho \vDash \neg\varphi$
+to prove that $TS \nvDash \varphi$.
+If such a trace doesn't exists then it must be the case that
+$TS \vDash \varphi$.\\
+In particular in the case of GR(1) formulas
+\[
+	\neg\varphi =
+	\left(\bigwedge_{i = 1}^n\Box\Diamond f_i \right) \wedge
+	\left(\bigvee_{j = 1}^m\Diamond\Box \neg g_j \right)
+\]
+\section{Correctness}
+
+In this section it will be discussed the correctness of the algorithms
+implemented for the verification of the satisfiability of GR(1) formulas by a
+transition system $TS$ and for the construction of a counterexample execution
+that invalidates the given GR(1) formula in $TS$.
+
+\subsection{Specification satisfiability}
+
+In order to prove that the transition system $TS$ satisfies the given GR(1)
+property $\varphi$ it will be searched whether there exist executions which
+trace $\rho$ satisfies $\neg\varphi$.
+\[
+	\neg\varphi = \left(\bigwedge_{i = 1}^n\Box\Diamond f_i \right) \wedge
+	\left( \bigvee_{j = 1}^m\Diamond\Box \neg g_j \right)
+\]
+If such an execution exists then
+$ \exists\, \rho.\ \rho \vDash \neg\varphi $
+thus $TS \nvDash \varphi$, otherwise
+$ \forall\, \rho.\ \rho \vDash \varphi $
+hence $TS \vDash \varphi$.
+\\ \\
+First of all compute the reachable states of $TS$ using the
+\minline{reach_from_region} function.
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def check_explain_gr1_spec(
+    spec: Spec,
+) -> Optional[Tuple[bool, Optional[Counterexample]]]:
+    parse_result = parse_gr1(spec)
+    if parse_result == None:
+        return None
+
+    ts = pynusmv.glob.prop_database().master.bddFsm
+    f_set, g_set = parse_result
+    reach, reach_frontiers = reach_from_region(
+        ts, ts.init, Method.POST, BDD.true())
+    ...
+\end{minted}
+
+Then for each $g_j$ of the set $g$ of formulas compute the region of
+reachable states satisfying
+$ \left(\bigwedge \Box\Diamond f \right) \wedge
+	\Box \neg g_j$
+as follows:
+\begin{itemize}
+	\item compute the region of reachable states satisfying $\neg g_j$
+	\item compute a fixpoint of the post function of the obtained region such
+	      that for each state $s' \in$ \minline{not_gj_post_fixpoint} there
+	      exist a state\\
+	      $s \in$ \minline{not_gj_post_fixpoint} and an input $i$ such that
+	      $s \overset{i}{\to} s' \in \llbracket React\rrbracket$.\\ \\
+	      If \minline{not_gj_post_fixpoint} = $\emptyset$ it means
+	      that there can't be a reachable state satisfying
+	      $ \Box \neg g_j $
+	      thus proceed with $g_{j+1}$; otherwise compute the recur regions in
+	      \minline{not_gj_post_fixpoint} of the various $f_i$ satisfying
+	      $ \left(\bigwedge_{1..i} \Box\Diamond f_i \right) \wedge
+		      \Box \neg g_j $
+	      using the \minline{meet_GF_f} function.
+	      \begin{itemize}
+		      \item If \minline{result} is not \minline{None} then there exists a
+		            reachable state satisfying
+		            $ \left(\bigwedge \Box\Diamond f \right) \wedge
+			            \Box \neg g_j $ hence satisfying
+		            $ \left(\bigwedge \Box\Diamond f \right) \wedge
+			            \Diamond\Box \neg g_j $, thus build a counterexample.
+		      \item Otherwise proceed with $g_{j+1}$
+	      \end{itemize}
+
+	\item If $\nexists\, g_j \in g$ such that the region of reachable states
+	      satisfying \\
+	      $ \left(\bigwedge \Box\Diamond f \right) \wedge
+		      \left( \Diamond\Box \neg g_j \right)$
+	      isn't empty then there's no execution which trace $\rho$ satisfies
+	      $ \left(\bigwedge \Box\Diamond f \right) \wedge
+		      \left( \bigvee \Diamond\Box \neg g \right) $
+	      hence\\
+	      $ \forall\, \rho. \rho \vDash \neg\left( \bigwedge \Box\Diamond f \right) \vee
+		      \left( \bigwedge \Box\Diamond g \right) =
+		      \left( \bigwedge \Box\Diamond f \right) \to
+		      \left( \bigwedge \Box\Diamond g \right) = \varphi $\\
+	      thus $TS \vDash \varphi$.
+\end{itemize}
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def check_explain_gr1_spec(
+    spec: Spec,
+) -> Optional[Tuple[bool, Optional[Counterexample]]]:
+    ...
+    for gj in iter(g_set):
+        not_gj_reachable = reach & (-spec_to_bdd(ts, gj))
+        not_gj_post_fixpoint = method_fixpoint(
+            ts, Method.POST, not_gj_reachable)
+
+        if not_gj_post_fixpoint.is_false(): continue
+
+        result = meet_GF_f(ts, f_set, not_gj_post_fixpoint)
+        if result:
+            f_set_recurs, f_set_recur_loopable_region = result
+            if not (result := get_counterexample(
+                    ts, f_set_recurs, f_set_recur_loopable_region, reach_frontiers
+                )):
+                raise Exception("Counterexample not found")
+            counterexample, states, _ = result
+            return False, counterexample
+    return True, None
+\end{minted}
+
+\subsubsection{Reachability}
+
+Use \minline{_REACHES} for memoizaition and compute the reachable states with
+BFS filtering each region transition with \minline{filter} to ensure that the
+reach stays within the desired region.
+
+\begin{minted}[fontsize=\scriptsize]{python}
+_REACHES: Dict[Tuple[Method, Start, Filter], Tuple[Reach, Frontiers]] = {}
+
+def reach_from_region(
+    ts: BddFsm, region: BDD, method: Method, filter: Filter
+) -> Tuple[Reach, Frontiers]:
+    result = _REACHES.get((method, region, filter))
+    if result: return result
+
+    if method == Method.PRE: reach_method = ts.pre
+    elif method == Method.POST: reach_method = ts.post
+
+    reach = region & filter
+    frontiers = [reach]
+    while frontiers[-1].isnot_false():
+        frontiers.append((reach_method(frontiers[-1]) - reach) & filter)
+        reach = reach | frontiers[-1]
+    _REACHES[(method, region, filter)] = (reach, frontiers)
+    return reach, frontiers
+\end{minted}
+
+\subsubsection{Method fixpoint}
+
+Repeatedly compute the conjunction between the \minline{current} region and
+the \minline{next} one obtained applying the transition method to
+\minline{current} until a fixpoint or an empty set is reached.
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def method_fixpoint(ts: BddFsm, method: Method, region: BDD) -> BDD:
+    if method == Method.POST: fixpoint_method = ts.post
+    elif method == Method.PRE: fixpoint_method = ts.pre
+    current = region
+    while current.isnot_false():
+        next = fixpoint_method(current) & current
+        if current.equal(next):
+            return current
+        current = next
+    return BDD.false()
+\end{minted}
+
+\subsubsection{$\bigwedge \Box\Diamond f$}
+
+Compute whether $TS$ satisfies $\bigwedge \Box\Diamond f$ within the
+\minline{reach} region. In order to do so for each $f_i \in f$.
+\begin{itemize}
+	\item compute the region within \minline{loopable_region} (where
+	      $\bigwedge_{1..i-1} \Box\Diamond f_k$ is satisfied) satisfying
+	      $\Box\Diamond f_i$; if it's empty then $\bigwedge \Box\Diamond f$
+	      isn't satisfied, otherwise $\bigwedge_{1..i} \Box\Diamond f_k$ is
+	      satisfied.
+	\item update \minline{loopable_region} by computing the reach of the recur
+	      region of $f_i$ filtering by its \minline{pre_reach} (states that can
+	      reach the recur region of $f_i$ in at least one transition), the newly
+	      computed one contains the states satisfying
+	      $\bigwedge_{1..i} \Box\Diamond f_k$
+\end{itemize}
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def meet_GF_f(
+    ts: BddFsm, f_set: Set[Spec], reach: PostReach
+) -> Optional[Tuple[List[Recur], BDD]]:
+    fi_recur = BDD.false()
+    fi_recurs = []
+    loopable_region = reach
+
+    for fi in iter(f_set):
+        result = GF_f(ts, fi, loopable_region, loopable_region)
+        if not result: return None
+        fi_recur, pre_reach = result
+        fi_recurs.append(fi_recur)
+        loopable_region, _ = reach_from_region(
+            ts, fi_recur, Method.POST, pre_reach)
+    return fi_recurs, loopable_region
+\end{minted}
+
+\subsubsection{$\Box\Diamond f$}
+
+Repeatability check algorithm modified by adding a filter for ensuring that
+\minline{f} is repeatable within the \minline{filter} region.
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def GF_f(
+    ts: BddFsm, f: Spec, region: BDD, filter: Filter
+) -> Optional[Tuple[Recur, PreReach]]:
+    recur = region & spec_to_bdd(ts, f) & filter
+    while recur.isnot_false():
+        pre_reach = BDD.false()
+        new = ts.pre(recur) & filter
+        while new.isnot_false():
+            pre_reach = pre_reach | new
+            if recur.entailed(pre_reach):
+                return recur, pre_reach
+            new = (ts.pre(new) - pre_reach) & filter
+        recur = recur & pre_reach
+    return None
+\end{minted}
+
+\subsection{Counterexample}
+
+Once the existence of at least an execution which trace $\rho$ satisfies
+$\neg\varphi$ has been proven build such a counterexample.
+\begin{itemize}
+	\item First compute a list of states looping and passing through the recur
+	      regions and staying within the \minline{loopable_region} using the\\
+	      \minline{get_loop_through_regions} function; each state in the loop
+	      satisfies
+	      $(\bigwedge \Box\Diamond f) \wedge (\bigvee \Diamond\Box \neg g)$.
+	\item (If a state in the loop intersects the initial states then rotates the
+	      loop to make it start from that state, for shortening the
+	      counterexample)
+	\item Then compute the shortest path (possibly empty) between the region of
+	      initial states and the first state of the loop  using the
+	      \minline{get_path} function and concatenate the obtained trace which
+	      then satisfies
+	      $\Diamond((\bigwedge \Box\Diamond f) \wedge (\bigvee \Diamond\Box \neg g))$
+	      thus satisfying
+	      $(\bigwedge \Box\Diamond f) \wedge (\bigvee \Diamond\Box \neg g)$.
+	\item If the loaded transition system has inputs generate the inputs between
+	      each state and its successor in the list of states computed and return
+	      the built counterexample.
+\end{itemize}
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def get_counterexample(
+    ts: BddFsm, recurs: List[Recur], loopable_region: BDD, reach_frontiers: Frontiers
+) -> Optional[Tuple[Counterexample, Path, List[Inputs]]]:
+    loop = get_loop_through_regions(
+        ts, recurs, reach_frontiers, loopable_region)
+    if loop == None: return None
+    loop = rotate_loop(ts, loop)
+    prefix = get_path(ts, ts.init, loop[0], BDD.true())
+    if prefix == None: return None
+    states = prefix[:-1] + loop
+    inputs: List[Inputs] = []
+    counterexample: List[Dict] = []
+
+    has_inputs = len(ts.bddEnc.inputsVars) > 0
+
+    for i in range(len(states) - 1):
+        if not ts.post(states[i]).intersected(states[i + 1]):
+            raise Exception("No transition between states", i, "and", i + 1)
+        counterexample.append(states[i].get_str_values())
+        if has_inputs:
+            inputs.append(
+                ts.pick_one_inputs(
+                    ts.get_inputs_between_states(states[i], states[i + 1])
+                )
+            )
+            counterexample.append(inputs[-1].get_str_values())
+        else:
+            counterexample.append({})
+    counterexample.append(states[-1].get_str_values())
+    return tuple(counterexample), states, inputs
+\end{minted}
+
+\subsubsection{Loop through regions}
+
+Compute a list of states within \minline{filter}, that loops and intersects
+all \minline{regions}.
+\begin{itemize}
+	\item Initialise \minline{start_region}, which is the region from which a
+	      loop could start, as the states in the last region of
+	      \minline{regions} within \minline{filter}, if it's empty then there's
+	      no loop.
+	\item Initialise \minline{waypoint_regions}, which are the regions that will
+	      be used and updated searching the counterexample.
+\end{itemize}
+Until \minline{start_region} isn't empty:
+\begin{enumerate}
+	\item Pick one state between the "fastest" reachable states of \minline{ts}
+	      inside \minline{start_region} and remove it from
+	      \minline{start_region}
+	\item Check if \minline{start} is reachable from \minline{start}, if not
+	      repeat the previous steps from 1 for finding a different
+	      \minline{start}
+	\item Initialise \minline{loop}, which represents the actual loop, and
+	      \minline{loop_waypoints}, which tracks the states of
+	      \minline{waypoint_regions} visited in the loop.
+	      \\ \\
+	      At each iteration, while the number of \minline{loop_waypoints} is
+	      greater than 0, tries computing the loop segment between the last
+	      \minline{loop_waypoints} and \minline{waypoint_regions[i-1]}:
+	      \begin{enumerate}
+		      \item Assign \minline{current_region}, which is the region that will
+		            be possibly reached by the loop in the current iteration, to
+		            either the start or the first region of
+		            \minline{waypoint_regions} not yet visited depending on
+		            whether the loop must be closed at this iteration or not.
+		      \item Compute the reach of the last waypoint visited.\\ \\
+		            If \minline{current_region} or \minline{start} aren't in the
+		            frontiers of the reach of the last waypoint then it means that
+		            either the start of the loop or the next waypoint region
+		            isn't reachable from the last waypoint thus remove it from
+		            \minline{loop_waypoints} and repeat from \textbf{(a)} the
+		            previous steps for finding a different waypoint for the
+		            previous region.
+		      \item Pick one state between the "fastest" reachable states from the
+		            last loop waypoint that are in \minline{current_region} and
+		            remove it from its \minline{waypoint_regions}
+		      \item Build a path from the last loop waypoint to
+		            \minline{next_state} and append it to \minline{loop} (removing
+		            the first state since it's already included in loop)
+		      \item If the number of \minline{regions} is the same as the number
+		            of \minline{loop_waypoints} then the loop is completed thus
+		            return it, else append \minline{next_state} to
+		            \minline{loop_waypoints} and iterate looking for the loop
+		            segment between \minline{next_state} and the next region in
+		            \minline{waypoint_regions} not yet visited.
+	      \end{enumerate}
+	      If \minline{loop_waypoints} has no elements then there's no loop
+	      passing through all \minline{regions} starting in \minline{start},
+	      thus repeat from 1 to search for a different \minline{start}.
+\end{enumerate}
+otherwise there's no reachable loop passing through \minline{regions} within
+\minline{filter}.
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def get_loop_through_regions(
+    ts: BddFsm, regions: List[BDD], reach_frontiers: Frontiers, filter: Filter
+) -> Optional[Loop]:
+    start_region = regions[-1] & filter
+    if start_region.is_false(): return None
+
+    waypoint_regions = regions
+    while start_region.isnot_false():
+        start_index = get_index_of(start_region, reach_frontiers)
+        if start_index == None: return None
+        start = ts.pick_one_state(start_region & reach_frontiers[start_index])
+        start_region = start_region - start
+        if not reach_from_region(
+                ts, ts.post(start), Method.POST, filter
+            )[0].intersected(start):
+            continue
+
+        loop = loop_waypoints = [start]
+        while i := len(loop_waypoints):
+            _, frontiers = reach_from_region(
+                ts, loop_waypoints[-1], Method.POST, filter
+            )
+            if i == len(regions):
+                current_region = start
+            else:
+                current_region = waypoint_regions[i - 1] & filter
+
+            index = get_index_of(current_region, frontiers)
+            start_index = get_index_of(start, frontiers)
+            if index == None or start_index == None:
+                waypoint_regions[i - 1] = regions[i - 1]
+                loop_waypoints.pop()
+                continue
+            next_state = ts.pick_one_state(current_region & frontiers[index])
+            waypoint_regions[i - 1] = waypoint_regions[i - 1] - next_state
+
+            segment = get_path(
+                ts, loop_waypoints[-1], next_state, filter, i == len(regions)
+            )
+            if segment == None: break
+
+            loop = loop + segment[1:]
+            if i == len(regions): return loop
+            loop_waypoints.append(next_state)
+    return None
+\end{minted}
+
+\subsubsection{Path}
+
+Builds a path within \minline{filter} from \minline{start} to \minline{end},
+ensuring at least one transition if the homonymous flag is \minline{True};
+in the case where such a path doesn't exists returns \minline{None}.
+\begin{enumerate}
+	\item Filters out states in \minline{start} and \minline{end} that aren't
+	      in \minline{filter}
+	\item if \minline{first} and \minline{end} are intersected then keeps in
+	      \minline{end} the intersection and if at least one transition is
+	      required remembers to add a transition and shifts \minline{first} to
+	      its post region filtered
+	\item Initialise \minline{current_region} as the end and pick one state
+	      from the region and put it in the path
+	\item Compute the reach frontiers of \minline{first} and uses them for
+	      building the path from \minline{end} backwards until \minline{first}
+	\item Lastly if a transition has to be added picks a state from the pre
+	      region of \minline{first} intersected with \minline{start} and then
+	      returns the path reversed in order to be in the correct order.
+\end{enumerate}
+
+\begin{minted}[fontsize=\scriptsize]{python}
+def get_path(
+    ts: BddFsm, start: Start, end: End, filter: Filter, ensure_transition: bool = False
+) -> Optional[Path]:
+    add_ts = False
+    first = start & filter
+    end = end & filter
+    if first.intersected(end):
+        end = first & end
+        if ensure_transition:
+            add_ts = True
+            first = ts.post(first) & filter
+
+    current_region = end & filter
+    path = [ts.pick_one_state(current_region)]
+    first_reach, frontiers = reach_from_region(ts, first, Method.POST, filter)
+
+    if not first_reach.intersected(end): return None
+
+    if end_index := get_index_of(end, frontiers) == None: return None
+
+    for i in range(end_index - 1, -1, -1):
+        current_region = frontiers[i] & ts.pre(path[-1])
+        path.append(ts.pick_one_state(current_region))
+
+    if add_ts:
+        current_region = start & ts.pre(first)
+        path.append(ts.pick_one_state(current_region))
+
+    return path[::-1]
+\end{minted}
+
+\section{Other aspects}
+
+It has as well been implemented a recursive solution for computing
+counterexamples using the \minline{recursive_get_loop_through_regions}
+function.
+
+\end{document}
